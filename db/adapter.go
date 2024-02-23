@@ -11,10 +11,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// we use GORM here to connect DataBase
-// check out GORM examples below
-// https://gorm.io/docs/create.html
-
 const (
 	SQLiteDBFileName string = "awds.db"
 )
@@ -52,7 +48,7 @@ func Start(config *commons.Config) (*DBAdapter, error) {
 		return nil, err
 	}
 
-	err = db.AutoMigrate(types.Device{}, types.Pod{}, types.Job{})
+	err = db.AutoMigrate(types.Device{}, types.JobSQLiteObj{})
 	if err != nil {
 		return nil, err
 	}

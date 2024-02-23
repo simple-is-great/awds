@@ -15,18 +15,60 @@ const (
 
 // Job represents an job, holding all necessary info. about job
 type Job struct {
-	ID          string    				`json:"id" gorm:"primaryKey"`
-	DeviceID 	string 	  				`json:"device_id"`
-	PodID 		string 		  			`json:"pod_id"`
-	InputSize 	int 		  			`json:"input_size"` // input size: total number of input for a job
-	PartitionRate float64				`json:"partition_rate`
-	DeviceStartIndex 	int				`json:"device_start_index"` 
-	DeviceEndIndex 	int					`json:"device_end_index"` 
-	PodStartIndex 	int					`json:"pod_start_index"` 
-	PodEndIndex 	int					`json:"pod_end_index"` 
-	Completed	bool 					`json:"completed"`
-	CreatedAt   time.Time 				`json:"created_at,omitempty"`
-	UpdatedAt   time.Time 				`json:"updated_at,omitempty"`
+	ID          	string    			`json:"id" gorm:"primaryKey"`
+	DeviceIDList 	[]string			`json:"device_id_list"`
+	StartIndex		int					`json:"start_index"`
+	EndIndex 		int 		  		`json:"end_index"` // equals to the inputSize
+	Scheduled		bool				`json:"scheduled"`
+	Completed		bool 				`json:"completed"`
+	CreatedAt   	time.Time 			`json:"created_at,omitempty"`
+	UpdatedAt   	time.Time 			`json:"updated_at,omitempty"`
+}
+
+type JobSQLiteObj struct {
+	ID          	string    			`json:"id" gorm:"primaryKey"`
+	DeviceIDList 	string				`json:"device_id_list"` // store it as comma-separated string
+	StartIndex		int					`json:"start_index"`
+	EndIndex 		int 		  		`json:"end_index"` // equals to the inputSize
+	Scheduled		bool				`json:"scheduled"`
+	Completed		bool 				`json:"completed"`
+	CreatedAt   	time.Time 			`json:"created_at,omitempty"`
+	UpdatedAt   	time.Time 			`json:"updated_at,omitempty"`
+}
+
+func (job *Job) ToJobSQLiteObj() JobSQLiteObj {
+	deviceIDList := []string{}
+	for _, deviceID := range job.DeviceIDList{
+		deviceIDList = append(deviceIDList, deviceID)
+	}
+
+	deviceIDListCSV := strings.Join(deviceIDList, ",")
+
+	return JobSQLiteObj{
+		ID: 			job.ID,
+		DeviceIDList: 	deviceIDListCSV,
+		StartIndex:  	job.StartIndex,
+		EndIndex: 		job.EndIndex,
+		Scheduled: 		job.Scheduled,
+		Completed: 		job.Completed,
+		CreatedAt: 		job.CreatedAt,
+		UpdatedAt: 		job.UpdatedAt,
+	}
+}
+
+func (job *JobSQLiteObj) ToJobObj() Job {
+	deviceIDList := strings.Split(job.DeviceIDList, ",")
+	
+	return Job {
+		ID: 			job.ID,
+		DeviceIDList: 	deviceIDList,
+		StartIndex:  	job.StartIndex,
+		EndIndex: 		job.EndIndex,
+		Scheduled: 		job.Scheduled,
+		Completed: 		job.Completed,
+		CreatedAt: 		job.CreatedAt,
+		UpdatedAt: 		job.UpdatedAt,
+	}
 }
 
 func ValidateJobID(id string) error {

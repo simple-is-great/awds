@@ -12,7 +12,6 @@ func (adapter *RESTAdapter) setupRouter() {
 	adapter.router.GET("/ping", adapter.handlePing)
 
 	adapter.setupDeviceRouter()
-	adapter.setupPodRouter()
 	adapter.setupJobRouter()
 }
 

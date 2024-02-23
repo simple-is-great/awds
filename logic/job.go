@@ -3,7 +3,8 @@ package logic
 import (
 	"awds/types"
 	"fmt"
-	"math"
+	"strings"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 	log "github.com/sirupsen/logrus"
@@ -11,7 +12,7 @@ import (
 
 var (
 	// starts small, grow later
-	batchSize int = 10
+	batchSize int = 5
 )
 
 func (logic *Logic) ListJobs() ([]types.Job, error) {
@@ -38,129 +39,60 @@ func (logic *Logic) GetJob(jobID string) (types.Job, error) {
 	return logic.dbAdapter.GetJob(jobID)
 }
 
-func (logic *Logic) CreateJob(job *types.Job) error {
+func (logic *Logic) InsertJob(job *types.Job) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "logic",
 		"struct":   "Logic",
-		"function": "CreateJob",
+		"function": "InsertJob",
 	})
 
-	logger.Debug("received CreateJob()")
+	logger.Debug("received InsertJob()")
 
 	return logic.dbAdapter.InsertJob(job)
 }
 
-func (logic *Logic) UpdateJobDevice (jobID string, deviceID string) error {
+func (logic *Logic) UpdateDeviceIDList(jobID string, deviceIDList []string) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "logic",
 		"struct":   "Logic",
-		"function": "UpdateJobDevice",
+		"function": "UpdateDeviceIDList",
 	})
+
+	deviceIDTemp := []string{}
+	for _, deviceID := range deviceIDList{
+		deviceIDTemp = append(deviceIDTemp, deviceID)
+	}
+
+	deviceIDListCSV := strings.Join(deviceIDTemp, ",")
 
 	logger.Debug("received UpdateJobDevice()")
 
-	return logic.dbAdapter.UpdateJobDevice(jobID, deviceID)
+	return logic.dbAdapter.UpdateDeviceIDList(jobID, deviceIDListCSV)
 }
 
-func (logic *Logic) UpdateJobPod(jobID string, podID string) error {
+func (logic *Logic) UpdateEndIndex(jobID string, endIndex int) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "logic",
 		"struct":   "Logic",
-		"function": "UpdateJobPod",
+		"function": "UpdateEndIndex",
 	})
 
-	logger.Debug("received UpdateJobPod()")
+	logger.Debug("received UpdateEndIndex()")
 
-	return logic.dbAdapter.UpdateJobPod(jobID, podID)
+	return logic.dbAdapter.UpdateEndIndex(jobID, endIndex)
 }
 
-func (logic *Logic) UpdateInputSize(jobID string, inputSize int) error {
-	logger := log.WithFields(log.Fields{
-		"package":  "logic",
-		"struct":   "Logic",
-		"function": "UpdateInputSize",
-	})
+// func (logic *Logic) UpdateJobCompleted(jobID string, completed bool) error {
+// 	logger := log.WithFields(log.Fields{
+// 		"package":  "logic",
+// 		"struct":   "Logic",
+// 		"function": "UpdateJobCompleted",
+// 	})
 
-	logger.Debug("received UpdateInputSize()")
+// 	logger.Debug("received UpdateJobCompleted()")
 
-	return logic.dbAdapter.UpdateInputSize(jobID, inputSize)
-}
-
-func (logic *Logic) UpdatePartitionRate(jobID string, partitionRate float64) error {
-	logger := log.WithFields(log.Fields{
-		"package":  "logic",
-		"struct":   "Logic",
-		"function": "UpdatePartitionRate",
-	})
-
-	logger.Debug("received UpdatePartitionRate()")
-
-	return logic.dbAdapter.UpdatePartitionRate(jobID, partitionRate)
-}
-
-func (logic *Logic) UpdateJobCompleted(jobID string, completed bool) error {
-	logger := log.WithFields(log.Fields{
-		"package":  "logic",
-		"struct":   "Logic",
-		"function": "UpdateJobCompleted",
-	})
-
-	logger.Debug("received UpdateJobCompleted()")
-
-	return logic.dbAdapter.UpdateJobCompleted(jobID, completed)
-}
-
-func (logic *Logic) UpdateDeviceStartIndex(jobID string, deviceStartIndex int) error {
-	logger := log.WithFields(log.Fields{
-		"package":  "logic",
-		"struct":   "Logic",
-		"function": "UpdateDeviceStartIndex",
-	})
-
-	logger.Debug("received UpdateDeviceStartIndex()")
-
-	return logic.dbAdapter.UpdateDeviceStartIndex(jobID, deviceStartIndex)
-}
-
-
-func (logic *Logic) UpdateDeviceEndIndex(jobID string, deviceEndIndex int) error {
-	logger := log.WithFields(log.Fields{
-		"package":  "logic",
-		"struct":   "Logic",
-		"function": "UpdateDeviceEndIndex",
-	})
-
-	logger.Debug("received UpdateDeviceEndIndex()")
-
-	return logic.dbAdapter.UpdateDeviceEndIndex(jobID, deviceEndIndex)
-}
-
-
-func (logic *Logic) UpdatePodStartIndex(jobID string, podStartIndex int) error {
-	logger := log.WithFields(log.Fields{
-		"package":  "logic",
-		"struct":   "Logic",
-		"function": "UpdatePodStartIndex",
-	})
-
-	logger.Debug("received UpdatePodStartIndex()")
-
-	return logic.dbAdapter.UpdatePodStartIndex(jobID, podStartIndex)
-}
-
-
-
-func (logic *Logic) UpdatePodEndIndex(jobID string, podEndIndex int) error {
-	logger := log.WithFields(log.Fields{
-		"package":  "logic",
-		"struct":   "Logic",
-		"function": "UpdatePodEndIndex",
-	})
-
-	logger.Debug("received UpdatePodEndIndex()")
-
-	return logic.dbAdapter.UpdatePodEndIndex(jobID, podEndIndex)
-}
+// 	return logic.dbAdapter.UpdateJobCompleted(jobID, completed)
+// }
 
 func (logic *Logic) DeleteJob(jobID string) error {
 	logger := log.WithFields(log.Fields{
@@ -174,172 +106,151 @@ func (logic *Logic) DeleteJob(jobID string) error {
 	return logic.dbAdapter.DeleteJob(jobID)
 }
 
-func (logic *Logic) Precompute(jobID string, deviceEndpoint string, podEndpoint string, inputSize int) error {
+// func (logic *Logic) Precompute(jobID string, deviceEndpoint string, podEndpoint string, inputSize int) error {
+// 	logger := log.WithFields(log.Fields{
+// 		"package": "logic",
+// 		"struct" : "Logic",
+// 		"function" : "Precompute",
+// 	})
+
+// 	logger.Debug("received Precompute()")
+
+// 	var deviceResult, podResult float64
+// 	startIdx := 0
+// 	// precomputation: 0.1%, serve as endIdx for precomputation
+// 	precomputeSize := int(0.001 * float64(inputSize)) 
+// 	if precomputeSize < 1 {
+// 		precomputeSize = 1 
+// 	}
+
+// 	deviceFullEndpoint := logic.GetFullEndpoint(deviceEndpoint, startIdx, precomputeSize)
+// 	podFullEndpoint := logic.GetFullEndpoint(podEndpoint, startIdx, precomputeSize)
+// 	fmt.Println("precompute device endpoint", deviceFullEndpoint)
+// 	fmt.Println("precompute pod endpoint", podFullEndpoint)
+	
+// 	// set client to pull results from device
+// 	deviceResultChan := make(chan float64, 1)
+// 	podResultChan := make(chan float64, 1)
+// 	errChan := make(chan error, 2)
+
+// 	// precompute device
+// 	go func() {
+// 		deviceResult, err := logic.ComputeDevice(jobID, deviceEndpoint, startIdx, precomputeSize)
+// 			if err != nil {
+// 				errChan <- err
+// 				return
+// 			}
+// 		deviceResultChan <- deviceResult
+// 	}()
+	
+// 	// precompute pod
+// 	go func() {
+// 		podResult, err := logic.ComputePod(jobID, podEndpoint, startIdx, precomputeSize)
+// 			if err != nil {
+// 				errChan <- err
+// 				return
+// 			}
+// 		podResultChan <- podResult
+// 	}()
+	
+// 	// wait for both results
+// 	for i := 0; i < 2; i++ {
+// 		select {
+// 		case deviceResult = <- deviceResultChan:
+// 		case podResult = <- podResultChan:
+// 		case err := <- errChan:
+// 			return err
+// 		}
+// 	}
+
+// 	deviceUnitResult := deviceResult / float64(precomputeSize - startIdx)
+// 	podUnitResult := podResult / float64(precomputeSize - startIdx)
+
+// 	// set partitionRate based on precomputation result
+// 	partitionRate := math.Round(podUnitResult / (deviceUnitResult + podUnitResult) * 100) / 100
+
+// 	deviceEndIdx := int( partitionRate * float64(batchSize) )
+	
+// 	if deviceEndIdx < 1 {
+// 		deviceEndIdx = 1
+// 	}
+// 	fmt.Println("Before save, deviceEndIdx", deviceEndIdx)
+
+// 	// update device start, end index
+// 	err := logic.dbAdapter.UpdateDeviceStartIndex(jobID, 0)
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	err = logic.dbAdapter.UpdateDeviceEndIndex(jobID, deviceEndIdx)
+// 	if err != nil {
+// 		return err
+// 	}
+	
+// 	// update pod start, end index
+// 	err = logic.dbAdapter.UpdatePodStartIndex(jobID, deviceEndIdx)
+// 	if err != nil {
+// 		return err
+// 	}
+	
+// 	err = logic.dbAdapter.UpdatePodEndIndex(jobID, batchSize)
+// 	if err != nil {
+// 		return err
+// 	}
+
+// 	// update partition rate, used when device fully offloads and need to reassign works
+// 	err = logic.dbAdapter.UpdatePartitionRate(jobID, partitionRate)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	return nil
+// }
+
+func (logic *Logic) Compute(jobID string, deviceID string) error {
 	logger := log.WithFields(log.Fields{
 		"package": "logic",
 		"struct" : "Logic",
-		"function" : "Precompute",
+		"function" : "Compute",
 	})
 
-	logger.Debug("received Precompute()")
+	logger.Debugf("received Compute()")
 
-	var deviceResult, podResult float64
-	startIdx := 0
-	// precomputation: 0.1%, serve as endIdx for precomputation
-	precomputeSize := int(0.001 * float64(inputSize)) 
-	if precomputeSize < 1 {
-		precomputeSize = 1 
-	}
-
-	deviceFullEndpoint := logic.GetFullEndpoint(deviceEndpoint, startIdx, precomputeSize)
-	podFullEndpoint := logic.GetFullEndpoint(podEndpoint, startIdx, precomputeSize)
-	fmt.Println("precompute device endpoint", deviceFullEndpoint)
-	fmt.Println("precompute pod endpoint", podFullEndpoint)
-	
-	// set client to pull results from device
-	deviceResultChan := make(chan float64, 1)
-	podResultChan := make(chan float64, 1)
-	errChan := make(chan error, 2)
-
-	// precompute device
-	go func() {
-		deviceResult, err := logic.ComputeDevice(jobID, deviceEndpoint, startIdx, precomputeSize)
-			if err != nil {
-				errChan <- err
-				return
-			}
-		deviceResultChan <- deviceResult
-	}()
-	
-	// precompute pod
-	go func() {
-		podResult, err := logic.ComputePod(jobID, podEndpoint, startIdx, precomputeSize)
-			if err != nil {
-				errChan <- err
-				return
-			}
-		podResultChan <- podResult
-	}()
-	
-	// wait for both results
-	for i := 0; i < 2; i++ {
-		select {
-		case deviceResult = <- deviceResultChan:
-		case podResult = <- podResultChan:
-		case err := <- errChan:
-			return err
-		}
-	}
-
-	deviceUnitResult := deviceResult / float64(precomputeSize - startIdx)
-	podUnitResult := podResult / float64(precomputeSize - startIdx)
-
-	// set partitionRate based on precomputation result
-	partitionRate := math.Round(podUnitResult / (deviceUnitResult + podUnitResult) * 100) / 100
-
-	// if deviceResult - podResult > 0.99 {
-	// 	batchSize *= int(1 / partitionRate)
-	// 	if batchSize > inputSize {
-	// 		batchSize = inputSize
-	// 	}
-	// }
-
-	deviceEndIdx := int( partitionRate * float64(batchSize) )
-	
-	if deviceEndIdx < 1 {
-		deviceEndIdx = 1
-	}
-	fmt.Println("Before save, deviceEndIdx", deviceEndIdx)
-
-	// update device start, end index
-	err := logic.dbAdapter.UpdateDeviceStartIndex(jobID, 0)
+	job, err := logic.GetJob(jobID)
 	if err != nil {
 		return err
 	}
 
-	err = logic.dbAdapter.UpdateDeviceEndIndex(jobID, deviceEndIdx)
+	// assign job first
+	err = logic.dbAdapter.UpdateStartIndex(jobID, job.StartIndex + batchSize)
 	if err != nil {
 		return err
 	}
+
+	device, err := logic.GetDevice(deviceID)
+	if err != nil {
+		return err
+	}
+
+	var response map[string]interface{}
+	fullEndpoint := logic.GetFullEndpoint(device.Endpoint, job.StartIndex, job.StartIndex + batchSize)
+	fmt.Println("compute full endpoint", fullEndpoint)
 	
-	// update pod start, end index
-	err = logic.dbAdapter.UpdatePodStartIndex(jobID, deviceEndIdx)
-	if err != nil {
-		return err
-	}
-	
-	err = logic.dbAdapter.UpdatePodEndIndex(jobID, batchSize)
-	if err != nil {
-		return err
-	}
-
-	// update partition rate, used when device fully offloads and need to reassign works
-	err = logic.dbAdapter.UpdatePartitionRate(jobID, partitionRate)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-func (logic *Logic) ComputeDevice(jobID string, deviceEndpoint string, startIdx int, endIdx int) (float64, error) {
-	logger := log.WithFields(log.Fields{
-		"package": "logic",
-		"struct" : "Logic",
-		"function" : "ComputeDevice",
-	})
-
-	logger.Debugf("received ComputeDevice()")
-
-	var deviceResponse map[string]interface{}
 	client := resty.New()
-	// request to device	
-	deviceFullEndpoint := logic.GetFullEndpoint(deviceEndpoint, startIdx, endIdx)
-	fmt.Println("compute device full endpoint", deviceFullEndpoint)
-
-	_, err := client.R().SetResult(&deviceResponse).Get(deviceFullEndpoint)
-	if err != nil {
-		return -1, err
-	}
-	// HandleResponse transforms deviceResponse object to float64
-	deviceResult, err := logic.HandleResponse(deviceResponse)
-	if err != nil {
-		return -1, err
-	}
-
-	fmt.Println("device", deviceResult)
 	
-	return deviceResult, nil
-}
-
-func (logic *Logic) ComputePod(jobID string, podEndpoint string, startIdx int, endIdx int) (float64, error) {
-	logger := log.WithFields(log.Fields{
-		"package": "logic",
-		"struct" : "Logic",
-		"function" : "ComputePod",
-	})
-
-	logger.Debugf("received ComputePod()")
-
-	var podResponse map[string]interface{}
-	client := resty.New()	
-	podFullEndpoint := logic.GetFullEndpoint(podEndpoint, startIdx, endIdx)
-	fmt.Println("compute pod full endpoint", podFullEndpoint)
-
-	// request to pod	
-	_, err := client.R().SetResult(&podResponse).Get(podFullEndpoint)
+	_, err = client.R().SetResult(&response).Get(fullEndpoint)
 	if err != nil {
-		return -1, err
-	}
-
-	podResult , err := logic.HandleResponse(podResponse)
-	if err != nil {
-		return -1, err
+		return err
 	}
 	
-	fmt.Println("pod", podResult)
+	result, err := logic.HandleResponse(response) // TODO: change return type of handleResponse
+	if err != nil {
+		return err
+	}
 
-	return podResult, nil
-
+	fmt.Println(deviceID, result)
+	// later change this line to test whether compute succeed
+	
+	return nil
 }
 
 func (logic *Logic) ScheduleJob(jobID string) error {
@@ -356,91 +267,125 @@ func (logic *Logic) ScheduleJob(jobID string) error {
 		return err
 	}
 
-	device, err := logic.dbAdapter.GetDevice(job.DeviceID)
+	// initialize start index as 0
+	err = logic.dbAdapter.UpdateStartIndex(jobID, 0)
 	if err != nil {
 		return err
 	}
 
-	pod, err := logic.dbAdapter.GetPod(job.PodID)
-	if err != nil {
-		return err
-	}
-
-	// if job finishes in single batch, set batchSize to inputSize
-	if batchSize >= job.InputSize {
-		batchSize = job.InputSize		
-	}
+	computeWithRetry := func(jobID, deviceID string, maxRetries int) error {
+        for i := 0; i < maxRetries; i++ {
+            err := logic.Compute(jobID, deviceID)
+            if err == nil {
+                return nil // success, no need to retry
+            }
+			// Optionally, implement some backoff strategy here
+			
+        }
+		// return failed range(start to end)
+        return fmt.Errorf("compute failed after %d attempts", maxRetries)
+    }
 
 	// precompute
-	err = logic.Precompute(jobID, device.Endpoint, pod.Endpoint, job.InputSize)
-	if err != nil {
-		fmt.Println(err)
-		return err
+	// change this later
+	// err = logic.Precompute(jobID, device.Endpoint, pod.Endpoint, job.InputSize)
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return err
+	// }
+	// fmt.Println("precomputation ended...")
+
+	var stop bool
+	errChan := make(chan error, 1) // buffer of 1 to avoid blocking
+	for _, deviceID := range job.DeviceIDList {
+        go func(dID string) {
+            for !stop {
+                err := computeWithRetry(jobID, dID, 3) // set MaxRetry 3
+                if err != nil {
+                    errChan <- err
+                    return
+                }
+                // check job status before continuing
+                currentJob, err := logic.dbAdapter.GetJob(jobID)
+                if err != nil || currentJob.Completed {
+                    stop = true
+                    return
+                }
+            }
+        }(deviceID)
+		// sleep for 0.01s, to prevent race condition
+		// TODO: find more fancy solution
+		time.Sleep(10 * time.Millisecond)
+    }
+	
+	select {
+    case err := <-errChan:
+        stop = true // signal other goroutines to stop
+        return err
+    default:
+		fmt.Println("Job completed")
 	}
-	fmt.Println("precomputation ended...")
-
 	// compute til end
-	for {
-		job, err = logic.dbAdapter.GetJob(jobID)
-		if err != nil {
-			return err
-		}
+	// for {
+	// 	job, err = logic.dbAdapter.GetJob(jobID)
+	// 	if err != nil {
+	// 		return err
+	// 	}
 		
-		// break when job completes
-		if job.Completed {
-			break
-		}
+	// 	// break when job completes
+	// 	if job.Completed {
+	// 		break
+	// 	}
 		
-		//set channels to get device, pod results
-		deviceResultsChan := make(chan float64, 1)
-		podResultsChan := make(chan float64, 1)
-		errChan := make(chan error, 2)
-		var deviceResult, podResult float64
+	// 	deviceCount := len(job.DeviceIDList)
+	// 	// set channels to get results
+	// 	// deviceResultsChan := make(chan float64, device_num)
+	// 	errChan := make(chan error, deviceCount)
+	// 	wg := sync.WaitGroup{}
+	// 	wg.Add(deviceCount)
+		
+	// 	for _, deviceID := range job.DeviceIDList{
+	// 		// compute
+	// 		// if err != nil -> do again
+	// 		go func(dID string) {
+	// 			defer wg.Done()
+	// 			err := logic.Compute(jobID, deviceID)
+	// 			if err != nil {
+	// 				errChan <- err
+	// 			}
+	// 			// deviceResultsChan <- result
+	// 		}(deviceID)
 
-		// compute device
-		go func() {
-			result, err := logic.ComputeDevice(jobID, device.Endpoint, job.DeviceStartIndex, job.DeviceEndIndex)
-			if err != nil {
-				errChan <- err
-				return
-			}
-			deviceResultsChan <- result
-		}()
+	// 	}
+	// 	wg.Wait()
+	// 	close(errChan)
 
-		// compute pod
-		go func() {
-			result, err := logic.ComputePod(jobID, pod.Endpoint, job.PodStartIndex, job.PodEndIndex)
-			if err != nil {
-				errChan <- err
-				return
-			}
-			podResultsChan <- result
-		}()
-		
-		// TODO
-		// if pod or device ends but the other doesn't end
-		// run next job
+	// 	// Check if there were any errors
+	// 	if len(errChan) > 0 {
+	// 		return <-errChan // returns the first error encountered
+	// 	}
 
-		// wait for the results
-		for i :=0; i < 2; i++{
-			select {
-			case result := <-deviceResultsChan:
-				deviceResult = result
-			case result := <-podResultsChan:
-				podResult = result
-			case err := <-errChan:
-				return err
-			}
-		}
 		
-		podUnitResult := podResult / (float64(job.PodEndIndex) - float64(job.PodStartIndex))
-		deviceUnitResult := deviceResult / (float64(job.DeviceEndIndex) - float64(job.DeviceStartIndex))
+	// 	// job completed
+	// 	if job.StartIndex == job.EndIndex{
+	// 		err = logic.dbAdapter.UpdateJobCompleted(jobID, true)
+	// 		if err != nil {
+	// 			return err
+	// 		}
+	// 	}		
+	// }
+
+	return nil
+}
+
+		// batchSize 결정할 때 참고
+		// podUnitResult := podResult / (float64(job.PodEndIndex) - float64(job.PodStartIndex))
+		// deviceUnitResult := deviceResult / (float64(job.DeviceEndIndex) - float64(job.DeviceStartIndex))
 
 		// calculate partitionRate
 		// modified to get unit result
-		partitionRate := math.Round(podUnitResult / (deviceUnitResult + podUnitResult) * 100) / 100
-		fmt.Println("partitionRate", partitionRate)
-		
+		// partitionRate := math.Round(podUnitResult / (deviceUnitResult + podUnitResult) * 100) / 100
+		// fmt.Println("partitionRate", partitionRate)
 		// dynamically change batchSize
 		// batchSize *= int(1 / partitionRate)
 		// if batchSize > job.InputSize{
@@ -448,74 +393,16 @@ func (logic *Logic) ScheduleJob(jobID string) error {
 		// }
 
 		// calculate workload for device and pod
-		deviceWork := int(float64(batchSize) * partitionRate)
-		fmt.Println("before setting", deviceWork)
-		if deviceWork < 1{
-			// if device is 100 times slower than pod
-			// allocate minimum work(1 input)
-			// pod didn't do work -> get previousPartitionRate
-			deviceWork = 1
-		}
-		fmt.Println("after setting", deviceWork)
-		podWork := batchSize - deviceWork 
+		// deviceWork := int(float64(batchSize) * partitionRate)
+		// fmt.Println("before setting", deviceWork)
+		// if deviceWork < 1{
+		// 	// if device is 100 times slower than pod
+		// 	// allocate minimum work(1 input)
+		// 	// pod didn't do work -> get previousPartitionRate
+		// 	deviceWork = 1
+		// }
+		// podWork := batchSize - deviceWork 
 		
-		fmt.Println("deviceWork", deviceWork)
-		fmt.Println("podWork", podWork)
-
-		newDeviceStartIndex := job.PodEndIndex
-		newDeviceEndIndex := job.PodEndIndex + deviceWork
-
-		// update device start, end index
-		if job.PodEndIndex >= job.InputSize {
-			newDeviceStartIndex = job.InputSize
-		}
-
-		if newDeviceEndIndex >= job.InputSize {
-			newDeviceEndIndex = job.InputSize 
-		}
-
-		err = logic.dbAdapter.UpdateDeviceStartIndex(jobID, newDeviceStartIndex)
-		if err != nil {
-			return err
-		}
-		
-		err = logic.dbAdapter.UpdateDeviceEndIndex(jobID, newDeviceEndIndex)
-		if err != nil {
-			return err
-		}
-
-		newPodStartIndex := job.PodEndIndex + deviceWork
-		newPodEndIndex := newPodStartIndex + podWork
-
-		// update pod start index and end index
-		if newPodStartIndex > job.InputSize {
-			newPodStartIndex = job.InputSize 
-		}
-		if newPodEndIndex > job.InputSize {
-			newPodEndIndex = job.InputSize 
-		}
-
-		err = logic.dbAdapter.UpdatePodStartIndex(jobID, newPodStartIndex)
-		if err != nil {
-			return err
-		}
-
-		err = logic.dbAdapter.UpdatePodEndIndex(jobID, newPodEndIndex)
-		if err != nil {
-			return err
-		}
-		
-		// job completed
-		if ( job.DeviceEndIndex == job.InputSize ) || ( job.PodEndIndex == job.InputSize ){
-			err = logic.dbAdapter.UpdateJobCompleted(jobID, true)
-			if err != nil {
-				return err
-			}
-		}		
-	}
-
-	return nil
-}
 
 	// 먼저 끝나면, 끝난 장치에 요청 다시 보내야
 	// 다음 배치 가져와서 실행

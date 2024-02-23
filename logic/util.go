@@ -11,8 +11,9 @@ func (logic *Logic) GetFullEndpoint(endpoint string, startIdx int, endIdx int) s
 	return fmt.Sprintf("%s/%d-%d", endpoint, startIdx, endIdx)
 }
 
+// TODO: change this to handle bool value as response
 func (logic *Logic) HandleResponse(response map[string]interface{}) (float64, error) {
-	responseStr, ok := response["results"].(string)
+	responseStr, ok := response["result"].(string)
 	if !ok {
 		return float64(-1), fmt.Errorf("pod response 'results' is not a string")
 	}

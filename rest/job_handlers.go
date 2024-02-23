@@ -94,15 +94,11 @@ func (adapter *RESTAdapter) handleCreateJob(c *gin.Context) {
 
 
 	type jobCreationRequest struct {
-		DeviceID string 	  `json:"device_id"`
-		PodID string 		  `json:"pod_id"`
-		InputSize int		  `json:"input_size"`
+		DeviceIDList []string 			`json:"device_id_list"`
+		EndIndex 	 int				`json:"end_index"`
 	}
 
 	var input jobCreationRequest
-	
-	// need to get batch time from func
-	// do not manually get input
 
 	err := c.BindJSON(&input)
 	if err != nil {
@@ -114,13 +110,11 @@ func (adapter *RESTAdapter) handleCreateJob(c *gin.Context) {
 
 	job := types.Job{
 		ID:          	types.NewJobID(),
-		DeviceID:       input.DeviceID,
-		PodID:  		input.PodID,
-		InputSize: 		input.InputSize,
+		DeviceIDList:   input.DeviceIDList,
+		EndIndex: 		input.EndIndex,
 	}
 	
-	// TODO: need to notify finished job
-	err = adapter.logic.CreateJob(&job)
+	err = adapter.logic.InsertJob(&job)
 	if err != nil {
 		// fail
 		logger.Error(err)
@@ -151,15 +145,9 @@ func (adapter *RESTAdapter) handleUpdateJob(c *gin.Context) {
 	}
 
 	type jobUpdateRequest struct {
-		DeviceID			string 	  		`json:"device_id"`
-		PodID 				string 		  	`json:"pod_id"`
-		InputSize 			int		  		`json:"input_size"`
-		PartitionRate		float64			`json:"partition_rate"`
-		Completed			bool			`json:"completed"`
-		DeviceStartIndex 	int				`json:"device_start_index"` 
-		DeviceEndIndex 		int				`json:"device_end_index"` 
-		PodStartIndex 		int				`json:"pod_start_index"` 
-		PodEndIndex 		int				`json:"pod_end_index"` 
+		// TODO: decide how to change deviceID list in the job
+		DeviceIDList	[]string 	  	`json:"device_id_list"`
+		EndIndex		int				`json:"end_index"`
 	}
 
 	var input jobUpdateRequest
@@ -173,9 +161,9 @@ func (adapter *RESTAdapter) handleUpdateJob(c *gin.Context) {
 		return
 	}
 
-	if len(input.DeviceID) > 0 {
+	if len(input.DeviceIDList) > 0 {
 		// update DeviceID
-		err = adapter.logic.UpdateJobDevice(jobID, input.DeviceID)
+		err = adapter.logic.UpdateDeviceIDList(jobID, input.DeviceIDList)
 		if err != nil {
 			// fail
 			logger.Error(err)
@@ -184,86 +172,9 @@ func (adapter *RESTAdapter) handleUpdateJob(c *gin.Context) {
 		}
 	}
 
-	if len(input.PodID) > 0 {
-		// update PodID
-		err = adapter.logic.UpdateJobPod(jobID, input.PodID)
-		if err != nil {
-			// fail
-			logger.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-	}
-
-	if input.InputSize > 0 {
+	if input.EndIndex > 0 {
 		// update InputSize
-		err = adapter.logic.UpdateInputSize(jobID, input.InputSize)
-		if err != nil {
-			// fail
-			logger.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-	}
-
-	if input.PartitionRate > 0 {
-		// update PartitionRate
-		err = adapter.logic.UpdatePartitionRate(jobID, input.PartitionRate)
-		if err != nil {
-			// fail
-			logger.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-	}
-
-	if !input.Completed {
-		// unset Completed as false
-		err = adapter.logic.UpdateJobCompleted(jobID, input.Completed)
-		if err != nil {
-			// fail
-			logger.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-	}
-
-	if input.DeviceStartIndex > 0 {
-		// update DeviceStartIndex
-		err = adapter.logic.UpdateDeviceStartIndex(jobID, input.DeviceStartIndex)
-		if err != nil {
-			// fail
-			logger.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-	}
-
-	if input.DeviceEndIndex > 0 {
-		// update DockerImage
-		err = adapter.logic.UpdateDeviceEndIndex(jobID, input.DeviceEndIndex)
-		if err != nil {
-			// fail
-			logger.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-	}
-
-	if input.PodStartIndex > 0 {
-		// update PodStartIndex
-		err = adapter.logic.UpdatePodStartIndex(jobID, input.PodStartIndex)
-		if err != nil {
-			// fail
-			logger.Error(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-	}
-
-	if input.PodEndIndex > 0 {
-		// update PodEndIndex
-		err = adapter.logic.UpdatePodEndIndex(jobID, input.PodEndIndex)
+		err = adapter.logic.UpdateEndIndex(jobID, input.EndIndex)
 		if err != nil {
 			// fail
 			logger.Error(err)
