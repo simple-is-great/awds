@@ -2,7 +2,9 @@ package logic
 
 import (
 	"awds/types"
+	"fmt"
 
+	"github.com/go-resty/resty/v2"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -30,6 +32,37 @@ func (logic *Logic) GetDevice(deviceID string) (types.Device, error) {
 	return logic.dbAdapter.GetDevice(deviceID)
 }
 
+func (logic *Logic) GetDeviceInfo(device *types.Device) (*types.Device, error) {
+	var response map[string]interface{}
+	requestAddr := fmt.Sprintf("http://%s:%s/computing_measure", device.IP, device.Port)
+	fmt.Println("requestAddr", requestAddr)
+	client := resty.New()
+	_, err := client.R().SetResult(&response).Get(requestAddr)
+	if err != nil {
+		return nil, err
+	}
+
+	// save info
+	if response["network_latency"].(float64) <= 0 {
+		return nil, fmt.Errorf("Network unavailable, value must be positive!")
+	}
+	device.NetworkLatency = response["network_latency"].(float64)
+
+	if response["cpu"].(float64) <= 0 { 
+		return nil, fmt.Errorf("CPU unavailable, value must be postive!")
+	}
+	device.CPU = response["cpu"].(float64)
+
+	if response["memory"].(float64) <= 0 {
+		return nil, fmt.Errorf("Memory unavailable, value must be postive!")
+	}
+	device.Memory = response["memory"].(float64) // TODO: need to fix key, ram -> memory
+
+	fmt.Println("after getting info", device)
+
+	return device, nil
+}
+
 func (logic *Logic) CreateDevice(device *types.Device) error {
 	logger := log.WithFields(log.Fields{
 		"package":  "logic",
@@ -39,6 +72,12 @@ func (logic *Logic) CreateDevice(device *types.Device) error {
 
 	logger.Debug("received CreateDevice()")
 
+	// get device info
+	device, err := logic.GetDeviceInfo(device)
+	if err != nil {
+		return err
+	}
+	
 	return logic.dbAdapter.InsertDevice(device)
 }
 

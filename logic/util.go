@@ -2,26 +2,42 @@ package logic
 
 import (
 	"fmt"
-	"strconv"
 )
 
-
-
-func (logic *Logic) GetFullEndpoint(endpoint string, startIdx int, endIdx int) string {
-	return fmt.Sprintf("%s/%d-%d", endpoint, startIdx, endIdx)
+func (logic *Logic) GetFullEndpoint(ip string, port string, endpoint string, startIdx int, endIdx int) string {
+	return fmt.Sprintf("http://%s:%s/%s/%d-%d", ip, port, endpoint, startIdx, endIdx)
 }
 
-// TODO: change this to handle bool value as response
-func (logic *Logic) HandleResponse(response map[string]interface{}) (float64, error) {
-	responseStr, ok := response["result"].(string)
+func (logic *Logic) HandleResponse(response map[string]interface{}, key string) (interface{}, error) {
+	result, ok := response[key]
 	if !ok {
-		return float64(-1), fmt.Errorf("pod response 'results' is not a string")
-	}
-
-	result, err := strconv.ParseFloat(responseStr, 64)
-	if err != nil {
-		return float64(-1), fmt.Errorf("failed to parse results to float64: %v", err)
+		return fmt.Errorf("key '%s' is not found in response", key), nil
 	}
 
 	return result, nil
+}
+
+type Queue []string
+
+//IsEmpty - check if queue is empty
+func (q *Queue) IsEmpty() bool {
+	return len(*q) == 0
+}
+
+//Enqueue - append value to the queue
+func (q *Queue) Enqueue (id string) {
+	*q = append(*q, id)
+	fmt.Printf("Enqueue: %v\n", id)
+}
+
+//Dequeue - pop first element from queue
+func (q *Queue) Dequeue () interface{} {
+	if q.IsEmpty() {
+		fmt.Println("queue is empty")
+		return nil
+	}
+	data := (*q)[0] // get first element
+	*q = (*q)[1:]   // remove first element
+	fmt.Printf("Dequeue: %v\n", data)
+	return data
 }

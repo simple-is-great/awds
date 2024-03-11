@@ -44,7 +44,7 @@ func (adapter *DBAdapter) InsertJob(job *types.Job) error {
 	if result.Error != nil {
 		return result.Error
 	}
-
+	
 	if result.RowsAffected != 1 {
 		return xerrors.Errorf("failed to insert a job")
 	}
@@ -121,3 +121,35 @@ func (adapter *DBAdapter) DeleteJob(jobID string) error{
 	}
 	return nil
 }
+
+// func (adapter *DBAdapter) PrepareToCompute(jobID string, batchSize int) (types.Job, int, error) {
+// 	var sqliteJob types.JobSQLiteObj
+// 	var startIndex int
+// 	var newStartIndex int
+// 	var job types.Job
+// 	// transaction
+// 	err := adapter.db.Transaction(func(tx *gorm.DB) error{
+// 		if err := tx.Where("id = ?", jobID).First(&sqliteJob).Error; err != nil {
+// 			// failed to get sqliteJob
+// 			return err
+// 		}
+// 		// claim workload(update startIndex)
+// 		newStartIndex = startIndex + batchSize
+// 		sqliteJob.StartIndex = newStartIndex
+
+// 		adapter.db.Save(&sqliteJob)
+// 		return nil}, 
+// 		// sqlite only supports SERIALIZABLE(DEFAULT), SNAPSHOT ISOLATION, READ UNCOMMITTED
+// 		// may change to 
+// 		&sql.TxOptions{Isolation: sql.LevelReadUncommitted}) 
+
+// 	// err occurred during transaction
+// 	if err != nil {
+// 		return job, 0, err
+// 	}
+
+// 	// change back to Job object
+// 	job = (&sqliteJob).ToJobObj()
+
+// 	return job, startIndex, err
+// }

@@ -16,11 +16,17 @@ const (
 // Device represents a device, holding all necessary info. about device
 // may divide into ip, port later
 type Device struct {
-	ID          string    `json:"id" gorm:"primaryKey"`
-	Endpoint 	string	  `json:"endpoint"`
-	Description string    `json:"description,omitempty"`
-	CreatedAt   time.Time `json:"created_at,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at,omitempty"`
+	ID          				string    		`json:"id" gorm:"primaryKey"`
+	IP							string			`json:"ip"`
+	Port						string			`json:"port"` // metric server's port
+	Endpoint 					string	  		`json:"endpoint"` // endpoint to pull metric
+	Description 				string    		`json:"description,omitempty"`
+	CPU							float64			`json:"cpu"` 	  // CPU benchmark result(in seconds, lower is better)
+	Memory						float64			`json:"memory"`	  // memory size
+	NetworkLatency				float64	  		`json:"network_latency"`
+	// BatchSize					int				`json:"batch_size"`
+	CreatedAt   				time.Time 		`json:"created_at,omitempty"`
+	UpdatedAt   				time.Time 		`json:"updated_at,omitempty"`
 }
 
 func ValidateDeviceID(id string) error {

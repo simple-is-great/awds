@@ -4,6 +4,7 @@ import (
 	"awds/types"
 
 	"golang.org/x/xerrors"
+	"gorm.io/gorm/clause"
 )
 
 func (adapter *DBAdapter) ListDevices() ([]types.Device, error) {
@@ -19,9 +20,12 @@ func (adapter *DBAdapter) ListDevices() ([]types.Device, error) {
 func (adapter *DBAdapter) GetDevice(deviceID string) (types.Device, error) {
 	var device types.Device
 	result := adapter.db.Where("id = ?", deviceID).First(&device)
+	adapter.db.Clauses()
 	if result.Error != nil {
 		return device, result.Error
 	}
+	tx := adapter.db.Begin()
+	tx.Clauses(clause.Locking{Strength: "UPDATE"})
 
 	return device, nil
 }

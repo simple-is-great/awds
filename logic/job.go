@@ -4,7 +4,6 @@ import (
 	"awds/types"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/go-resty/resty/v2"
 	log "github.com/sirupsen/logrus"
@@ -12,7 +11,11 @@ import (
 
 var (
 	// starts small, grow later
-	batchSize int = 5
+	batchSize int = 10
+	// hashmap to store failedJob
+	// expected key: jobID, expected slice: "startidx-startidx+(batchSize)"
+	// should be included in the scheduler module later
+	failedJob map[string][]string
 )
 
 func (logic *Logic) ListJobs() ([]types.Job, error) {
@@ -206,7 +209,7 @@ func (logic *Logic) DeleteJob(jobID string) error {
 // 	return nil
 // }
 
-func (logic *Logic) Compute(jobID string, deviceID string) error {
+func (logic *Logic) Compute(device *types.Device, index int, batchSize int) (error) {
 	logger := log.WithFields(log.Fields{
 		"package": "logic",
 		"struct" : "Logic",
@@ -215,43 +218,69 @@ func (logic *Logic) Compute(jobID string, deviceID string) error {
 
 	logger.Debugf("received Compute()")
 
-	job, err := logic.GetJob(jobID)
-	if err != nil {
-		return err
-	}
-
 	// assign job first
-	err = logic.dbAdapter.UpdateStartIndex(jobID, job.StartIndex + batchSize)
-	if err != nil {
-		return err
-	}
-
-	device, err := logic.GetDevice(deviceID)
-	if err != nil {
-		return err
-	}
+	// err := logic.dbAdapter.UpdateStartIndex(job.ID, job.StartIndex + batchSize)
+	// if err != nil {
+	// 	return err
+	// }
 
 	var response map[string]interface{}
-	fullEndpoint := logic.GetFullEndpoint(device.Endpoint, job.StartIndex, job.StartIndex + batchSize)
-	fmt.Println("compute full endpoint", fullEndpoint)
+	fullEndpoint := logic.GetFullEndpoint(device.IP, device.Port,device.Endpoint, job.StartIndex, job.StartIndex + batchSize)
+	// fmt.Println("compute full endpoint", fullEndpoint)
 	
 	client := resty.New()
-	
-	_, err = client.R().SetResult(&response).Get(fullEndpoint)
+	_, err := client.R().SetResult(&response).Get(fullEndpoint)
 	if err != nil {
 		return err
 	}
 	
-	result, err := logic.HandleResponse(response) // TODO: change return type of handleResponse
-	if err != nil {
-		return err
+	result, ok := response["result"].(float64)
+	if !ok {
+		// failed to compute -> save index
+		// later change this if each schedule object holds map
+		// return logic.SaveFailedWorkload(job.ID, job.StartIndex, batchSize)
 	}
 
-	fmt.Println(deviceID, result)
-	// later change this line to test whether compute succeed
-	
+	fmt.Println(device.ID, result)
+
 	return nil
 }
+
+// TODO: implement map for each Job Object and 
+// func (logic *Logic) SaveFailedWorkload(jobID string, startIndex int, batchSize int) error {
+// 	// ensure failedJob map is initialized
+// 	if failedJob == nil {
+// 		failedJob = make(map[string][]string)
+// 	}
+
+// 	var failedIndex string = fmt.Sprintf("%d-%d", startIndex, startIndex+batchSize)
+// 	failedJob[jobID] = append(failedJob[jobID], failedIndex)
+	
+// 	return nil
+// }
+
+// func(logic *Logic) ComputeWithRetry(jobID string, deviceID string, batchSize int, maxRetries int) error {
+// 	for i := 0; i < maxRetries; i++ {
+// 		device, err := logic.dbAdapter.GetDevice(deviceID)
+// 		if err != nil {
+// 			return err
+// 		}
+		
+// 		job, err := logic.dbAdapter.GetJob(jobID)
+// 		if err != nil {
+// 			return err
+// 		}
+
+// 		err = logic.Compute(&device, &job, batchSize)
+// 		if err == nil {
+// 			// success, no need to retry
+// 			return nil 
+// 		}	
+// 	}
+// 	return fmt.Errorf("compute failed, saved to failedJob and will be computed later")
+// }
+
+
 
 func (logic *Logic) ScheduleJob(jobID string) error {
 	logger := log.WithFields(log.Fields{
@@ -262,70 +291,122 @@ func (logic *Logic) ScheduleJob(jobID string) error {
 
 	logger.Debug("received ScheduleJob()")
 
+    errChan := make(chan error, 1) // Buffer of 1 to avoid blocking
+	
 	job, err := logic.dbAdapter.GetJob(jobID)
 	if err != nil {
 		return err
 	}
 
 	// initialize start index as 0
-	err = logic.dbAdapter.UpdateStartIndex(jobID, 0)
-	if err != nil {
-		return err
-	}
-
-	computeWithRetry := func(jobID, deviceID string, maxRetries int) error {
-        for i := 0; i < maxRetries; i++ {
-            err := logic.Compute(jobID, deviceID)
-            if err == nil {
-                return nil // success, no need to retry
-            }
-			// Optionally, implement some backoff strategy here
-			
-        }
-		// return failed range(start to end)
-        return fmt.Errorf("compute failed after %d attempts", maxRetries)
-    }
+	// err = logic.dbAdapter.UpdateStartIndex(jobID, 0)
+	// if err != nil {
+	// 	return err
+	// }
 
 	// precompute
 	// change this later
 	// err = logic.Precompute(jobID, device.Endpoint, pod.Endpoint, job.InputSize)
-	// if err != nil {
-	// 	fmt.Println(err)
-	// 	return err
-	// }
-	// fmt.Println("precomputation ended...")
+	idx := job.StartIndex
+	// 사용 가능한 디바이스 리스트 / 맵 구조 구현 필요
+	// 1. scheduler 만들어서 scheduler에 queue를 저장 -> 여러 schedule들에 대해서 queue를 관리하기 어렵다
+	// 2. init 할 때 queue를 생성
+	
+	var q Queue
+	for _, deviceID := range job.DeviceIDList{
+		q.Enqueue(deviceID)
+	}
+	
+	for {
+		flag := 0 // flag to exit infinite for loop
+		// TODO: we need to calculate index and pass into threads
+		// 
+        go func(){
+            for {
+				// Check job status before continuing
+				currentJob, err := logic.dbAdapter.GetJob(jobID)
+				if err != nil {
+					errChan <- err
+					return
+				}
+				
+				if currentJob.Completed {
+					flag = 1
+					return
+				}
 
-	var stop bool
-	errChan := make(chan error, 1) // buffer of 1 to avoid blocking
-	for _, deviceID := range job.DeviceIDList {
-        go func(dID string) {
-            for !stop {
-                err := computeWithRetry(jobID, dID, 3) // set MaxRetry 3
-                if err != nil {
-                    errChan <- err
-                    return
-                }
-                // check job status before continuing
-                currentJob, err := logic.dbAdapter.GetJob(jobID)
-                if err != nil || currentJob.Completed {
-                    stop = true
-                    return
-                }
-            }
-        }(deviceID)
-		// sleep for 0.01s, to prevent race condition
-		// TODO: find more fancy solution
-		time.Sleep(10 * time.Millisecond)
+				dID := q.Dequeue().(string)
+				
+				device, err := logic.dbAdapter.GetDevice(dID)
+				if err != nil {
+					return
+				}
+				// device별 batchSize 계산 -> idx 사용할 것
+				err = logic.Compute(&device, idx, batchSize)
+				// TODO: change to compute
+				if err != nil {
+					errChan <- err
+					return
+				}
+				q.Enqueue(dID)
+			}
+			// sleep for 0.01s, to prevent race condition
+			// TODO: find more fancy solution
+			// time.Sleep(10 * time.Millisecond)
+		}()
+		if flag == 1 {
+			break
+		}
+	}
+	
+	// Wait for all goroutines to finish
+	go func() {
+        wg.Wait()
+        close(errChan) // Close the channel to signal completion
+    }()
+
+    // Handle errors from goroutines
+    for err := range errChan {
+        cancel() // Cancel all goroutines on error
+        return err // Return the first error encountered
     }
 	
-	select {
-    case err := <-errChan:
-        stop = true // signal other goroutines to stop
+	// Update Completed to true outside of the goroutines to ensure it's only done once
+    err = logic.dbAdapter.UpdateJobCompleted(jobID, true)
+    if err != nil {
         return err
-    default:
-		fmt.Println("Job completed")
-	}
-	// compute til end
+    }
+
+	// // check for error
+	// if len(failedJob[jobID]) > 0 {
+	// 	for _, deviceID := range job.DeviceIDList {
+	// 		go func(dID string) {
+	// 			for !stop {
+	// 				// need to get new batchSize here
+	// 				// TODO: need to modify ComputeWithRetry to accomodate failedJob
+	// 				err := logic.ComputeWithRetry(jobID, dID, batchSize, 3) // set MaxRetry 3
+	// 				if err != nil {
+	// 					errChan <- err
+	// 					return
+	// 				}
+	// 				// check job status before continuing
+	// 				currentJob, err := logic.dbAdapter.GetJob(jobID)
+	// 				if err != nil || currentJob.Completed {
+	// 					stop = true
+	// 					return
+	// 				}
+	// 			}
+	// 		}(deviceID)
+	// 		// sleep for 0.01s, to prevent race condition
+	// 		// TODO: find more fancy solution
+	// 		time.Sleep(10 * time.Millisecond)
+	// 	}
+	// }
+	
+	return nil
+}
+
+// compute til end
 	// for {
 	// 	job, err = logic.dbAdapter.GetJob(jobID)
 	// 	if err != nil {
@@ -375,8 +456,6 @@ func (logic *Logic) ScheduleJob(jobID string) error {
 	// 	}		
 	// }
 
-	return nil
-}
 
 		// batchSize 결정할 때 참고
 		// podUnitResult := podResult / (float64(job.PodEndIndex) - float64(job.PodStartIndex))
@@ -414,39 +493,6 @@ func (logic *Logic) ScheduleJob(jobID string) error {
 	// 마지막으로 끝난 애 기준으로, 늦은 애가 끝났을 때 빠른 애가 계속 돌고 있으므로
 	// 거기에 맞춰서 빠른 애가 몇 번 맞췄는지, 
 	// 마지막 세트: 20 = 8 + 8 + 4, 마지막 배치 비율로
-
-
-	// type Scheduler struct {
-		// 	config *commons.Config
-		// 	Job_list []*types.Job
-		// }
-		
-		// type ScheduleJob interface {
-		// 	getJob(string) (*types.Job)
-		// 	Precompute(*types.Job, string, string) (float64, error)
-		// 	Compute(*types.Job, string, string) (error)
-		// 	// add method if necessary
-		// }
-		
-		// // getJob returns Job from jobID
-		// func (scheduler *Scheduler) GetJob (jobID string) (types.Job) {
-		// 	var idx int
-		// 	jobList := scheduler.Job_list
-		
-		// 	// using generic, supported after Go 1.21
-		// 	// idx = slices.IndexFunc(scheduler.Job_list, func(j_ptr *types.Job) bool { return (*j_ptr).ID == jobID })
-		
-		// 	// using for loop, slower than Generic, use this for Go version lower than 1.21
-		// 	for i := range jobList {
-		// 		if jobList[i].ID == jobID {
-		// 			idx = i
-		// 			break
-		// 		}
-		// 	}
-		
-		// 	return *jobList[idx]
-		// }
-
 		
 // func (logic *Logic) UnscheduleJob(jobID string) error {
 // 	logger := log.WithFields(log.Fields{

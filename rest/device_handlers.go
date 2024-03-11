@@ -4,6 +4,7 @@ import (
 	"awds/types"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
@@ -90,12 +91,14 @@ func (adapter *RESTAdapter) handleRegisterDevice(c *gin.Context) {
 	logger.Infof("access request to %s", c.Request.URL)
 
 	type deviceRegistrationRequest struct {
-		Endpoint 	string	`json:"endpoint"`
-		Description string `json:"description,omitempty"`
+		IP						string			`json:"ip"`
+		Port					string			`json:"port"`
+		Endpoint				string			`json:"endpoint"`
+		Description 			string    		`json:"description,omitempty"`
 	}
 
 	var input deviceRegistrationRequest
-
+	
 	err := c.BindJSON(&input)
 	if err != nil {
 		// fail
@@ -104,9 +107,25 @@ func (adapter *RESTAdapter) handleRegisterDevice(c *gin.Context) {
 		return
 	}
 
+	if len(input.IP) == 0 {
+		remoteAddrFields := strings.Split(c.Request.RemoteAddr, ":")
+		if len(remoteAddrFields) > 0 {
+			input.IP = remoteAddrFields[0]
+		}
+	}
+
+	if len(input.Port) == 0 {
+		remoteAddrFields := strings.Split(c.Request.RemoteAddr, ":")
+		if len(remoteAddrFields) > 0 {
+			input.Port = remoteAddrFields[1]
+		}
+	}
+
 	device := types.Device{
 		ID:          types.NewDeviceID(),
-		Endpoint:    input.Endpoint,
+		IP:			 input.IP,
+		Port: 		 input.Port,
+		Endpoint: 	 input.Endpoint,
 		Description: input.Description, // optional
 	}
 
@@ -227,3 +246,4 @@ func (adapter *RESTAdapter) handleDeleteDevice(c *gin.Context) {
 
 	c.JSON(http.StatusOK, device)
 }
+
