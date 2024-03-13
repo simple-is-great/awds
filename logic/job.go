@@ -4,6 +4,7 @@ import (
 	"awds/types"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-resty/resty/v2"
 	log "github.com/sirupsen/logrus"
@@ -11,7 +12,7 @@ import (
 
 var (
 	// starts small, grow later
-	batchSize int = 10
+	batchSize int = 30
 	// hashmap to store failedJob
 	// expected key: jobID, expected slice: "startidx-startidx+(batchSize)"
 	// should be included in the scheduler module later
@@ -209,7 +210,7 @@ func (logic *Logic) DeleteJob(jobID string) error {
 // 	return nil
 // }
 
-func (logic *Logic) Compute(device *types.Device, index int, batchSize int) (error) {
+func (logic *Logic) Compute(device *types.Device, startIdx int, endLimit int, batchSize int) (error) {
 	logger := log.WithFields(log.Fields{
 		"package": "logic",
 		"struct" : "Logic",
@@ -218,14 +219,12 @@ func (logic *Logic) Compute(device *types.Device, index int, batchSize int) (err
 
 	logger.Debugf("received Compute()")
 
-	// assign job first
-	// err := logic.dbAdapter.UpdateStartIndex(job.ID, job.StartIndex + batchSize)
-	// if err != nil {
-	// 	return err
-	// }
-
 	var response map[string]interface{}
-	fullEndpoint := logic.GetFullEndpoint(device.IP, device.Port,device.Endpoint, job.StartIndex, job.StartIndex + batchSize)
+	endIdx := startIdx + batchSize
+	if startIdx + batchSize > endLimit {
+		endIdx = endLimit
+	}
+	fullEndpoint := logic.GetFullEndpoint(device.IP, device.Port,device.Endpoint, startIdx, endIdx)
 	// fmt.Println("compute full endpoint", fullEndpoint)
 	
 	client := resty.New()
@@ -234,12 +233,12 @@ func (logic *Logic) Compute(device *types.Device, index int, batchSize int) (err
 		return err
 	}
 	
-	result, ok := response["result"].(float64)
-	if !ok {
-		// failed to compute -> save index
-		// later change this if each schedule object holds map
-		// return logic.SaveFailedWorkload(job.ID, job.StartIndex, batchSize)
-	}
+	result := response["result"].(bool)
+	// if !ok {
+	// 	// failed to compute -> save index
+	// 	// later change this if each schedule object holds map
+	// 	// return logic.SaveFailedWorkload(job.ID, job.StartIndex, batchSize)
+	// }
 
 	fmt.Println(device.ID, result)
 
@@ -290,13 +289,18 @@ func (logic *Logic) ScheduleJob(jobID string) error {
 	})
 
 	logger.Debug("received ScheduleJob()")
-
-    errChan := make(chan error, 1) // Buffer of 1 to avoid blocking
 	
+	startTime := time.Now()
+
 	job, err := logic.dbAdapter.GetJob(jobID)
 	if err != nil {
 		return err
 	}
+	fmt.Println("before startIdx", job.StartIndex)
+	
+	startIdx := 0 // initialize startidx
+	startIdx = job.StartIndex // start index for job
+    errChan := make(chan error, 1) // buffer of 1 to avoid blocking
 
 	// initialize start index as 0
 	// err = logic.dbAdapter.UpdateStartIndex(jobID, 0)
@@ -307,10 +311,8 @@ func (logic *Logic) ScheduleJob(jobID string) error {
 	// precompute
 	// change this later
 	// err = logic.Precompute(jobID, device.Endpoint, pod.Endpoint, job.InputSize)
-	idx := job.StartIndex
-	// 사용 가능한 디바이스 리스트 / 맵 구조 구현 필요
-	// 1. scheduler 만들어서 scheduler에 queue를 저장 -> 여러 schedule들에 대해서 queue를 관리하기 어렵다
-	// 2. init 할 때 queue를 생성
+	endIdx := job.EndIndex
+	// 1. init 할 때 queue를 생성
 	
 	var q Queue
 	for _, deviceID := range job.DeviceIDList{
@@ -318,144 +320,82 @@ func (logic *Logic) ScheduleJob(jobID string) error {
 	}
 	
 	for {
-		flag := 0 // flag to exit infinite for loop
-		// TODO: we need to calculate index and pass into threads
-		// 
-        go func(){
-            for {
-				// Check job status before continuing
-				currentJob, err := logic.dbAdapter.GetJob(jobID)
-				if err != nil {
-					errChan <- err
-					return
+		// TODO: we need to calculate batchSize and pass into threads
+		// index: 작업의 input index
+		// get device ID from queue
+
+		if len(q) == 0 {
+			continue
+		}
+
+		dID, err := q.Dequeue()
+		if err != nil {
+			fmt.Println(err)
+		}
+
+		device, err := logic.dbAdapter.GetDevice(dID)
+		if err != nil {
+			q.Enqueue(dID)
+			return err
+		}
+		
+		// TODO: batchSize 계산 함수
+
+		// startIdx  < job.EndIndex -> create thread
+		if startIdx < endIdx{
+			// func inside thread
+			go func(){
+				// update startIdx
+				if len(q) == len(job.DeviceIDList) {
+					
 				}
-				
-				if currentJob.Completed {
-					flag = 1
-					return
+				err = logic.Compute(&device, startIdx, endIdx, batchSize)
+				startIdx += batchSize
+				// modify not to exceed batchSize
+				if startIdx + batchSize > endIdx{
+					startIdx = endIdx
 				}
 
-				dID := q.Dequeue().(string)
-				
-				device, err := logic.dbAdapter.GetDevice(dID)
-				if err != nil {
-					return
-				}
-				// device별 batchSize 계산 -> idx 사용할 것
-				err = logic.Compute(&device, idx, batchSize)
-				// TODO: change to compute
 				if err != nil {
 					errChan <- err
 					return
 				}
 				q.Enqueue(dID)
-			}
-			// sleep for 0.01s, to prevent race condition
-			// TODO: find more fancy solution
-			// time.Sleep(10 * time.Millisecond)
-		}()
-		if flag == 1 {
+			}()
+		}
+		// job ended
+		if startIdx == endIdx {
 			break
 		}
 	}
 	
 	// Wait for all goroutines to finish
-	go func() {
-        wg.Wait()
-        close(errChan) // Close the channel to signal completion
-    }()
+	// go func() {
+    //     wg.Wait()
+    //     close(errChan) // Close the channel to signal completion
+    // }()
 
     // Handle errors from goroutines
-    for err := range errChan {
-        cancel() // Cancel all goroutines on error
-        return err // Return the first error encountered
-    }
+    // for err := range errChan {
+    //     cancel() // Cancel all goroutines on error
+    //     return err // Return the first error encountered
+    // }
 	
+	fmt.Println("startIdx after scheduling", startIdx)
+	err = logic.dbAdapter.UpdateStartIndex(jobID, startIdx)
+	if err != nil {
+        return err
+    }
+
 	// Update Completed to true outside of the goroutines to ensure it's only done once
     err = logic.dbAdapter.UpdateJobCompleted(jobID, true)
     if err != nil {
         return err
     }
-
-	// // check for error
-	// if len(failedJob[jobID]) > 0 {
-	// 	for _, deviceID := range job.DeviceIDList {
-	// 		go func(dID string) {
-	// 			for !stop {
-	// 				// need to get new batchSize here
-	// 				// TODO: need to modify ComputeWithRetry to accomodate failedJob
-	// 				err := logic.ComputeWithRetry(jobID, dID, batchSize, 3) // set MaxRetry 3
-	// 				if err != nil {
-	// 					errChan <- err
-	// 					return
-	// 				}
-	// 				// check job status before continuing
-	// 				currentJob, err := logic.dbAdapter.GetJob(jobID)
-	// 				if err != nil || currentJob.Completed {
-	// 					stop = true
-	// 					return
-	// 				}
-	// 			}
-	// 		}(deviceID)
-	// 		// sleep for 0.01s, to prevent race condition
-	// 		// TODO: find more fancy solution
-	// 		time.Sleep(10 * time.Millisecond)
-	// 	}
-	// }
-	
+	timeTaken := time.Since(startTime)
+	fmt.Println("time taken:", timeTaken)
 	return nil
 }
-
-// compute til end
-	// for {
-	// 	job, err = logic.dbAdapter.GetJob(jobID)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-		
-	// 	// break when job completes
-	// 	if job.Completed {
-	// 		break
-	// 	}
-		
-	// 	deviceCount := len(job.DeviceIDList)
-	// 	// set channels to get results
-	// 	// deviceResultsChan := make(chan float64, device_num)
-	// 	errChan := make(chan error, deviceCount)
-	// 	wg := sync.WaitGroup{}
-	// 	wg.Add(deviceCount)
-		
-	// 	for _, deviceID := range job.DeviceIDList{
-	// 		// compute
-	// 		// if err != nil -> do again
-	// 		go func(dID string) {
-	// 			defer wg.Done()
-	// 			err := logic.Compute(jobID, deviceID)
-	// 			if err != nil {
-	// 				errChan <- err
-	// 			}
-	// 			// deviceResultsChan <- result
-	// 		}(deviceID)
-
-	// 	}
-	// 	wg.Wait()
-	// 	close(errChan)
-
-	// 	// Check if there were any errors
-	// 	if len(errChan) > 0 {
-	// 		return <-errChan // returns the first error encountered
-	// 	}
-
-		
-	// 	// job completed
-	// 	if job.StartIndex == job.EndIndex{
-	// 		err = logic.dbAdapter.UpdateJobCompleted(jobID, true)
-	// 		if err != nil {
-	// 			return err
-	// 		}
-	// 	}		
-	// }
-
 
 		// batchSize 결정할 때 참고
 		// podUnitResult := podResult / (float64(job.PodEndIndex) - float64(job.PodStartIndex))

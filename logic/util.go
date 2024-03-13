@@ -31,13 +31,12 @@ func (q *Queue) Enqueue (id string) {
 }
 
 //Dequeue - pop first element from queue
-func (q *Queue) Dequeue () interface{} {
+func (q *Queue) Dequeue() (string, error) {
 	if q.IsEmpty() {
-		fmt.Println("queue is empty")
-		return nil
+		return "", fmt.Errorf("queue is empty")
 	}
 	data := (*q)[0] // get first element
 	*q = (*q)[1:]   // remove first element
 	fmt.Printf("Dequeue: %v\n", data)
-	return data
+	return data, nil
 }

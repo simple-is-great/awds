@@ -4,7 +4,6 @@ import (
 	"awds/types"
 
 	"golang.org/x/xerrors"
-	"gorm.io/gorm/clause"
 )
 
 func (adapter *DBAdapter) ListDevices() ([]types.Device, error) {
@@ -20,12 +19,9 @@ func (adapter *DBAdapter) ListDevices() ([]types.Device, error) {
 func (adapter *DBAdapter) GetDevice(deviceID string) (types.Device, error) {
 	var device types.Device
 	result := adapter.db.Where("id = ?", deviceID).First(&device)
-	adapter.db.Clauses()
 	if result.Error != nil {
 		return device, result.Error
 	}
-	tx := adapter.db.Begin()
-	tx.Clauses(clause.Locking{Strength: "UPDATE"})
 
 	return device, nil
 }
@@ -49,9 +45,7 @@ func (adapter *DBAdapter) UpdateDeviceEndpoint(deviceID string, endpoint string)
 	if result.Error != nil {
 		return result.Error
 	}
-
 	record.Endpoint = endpoint
-
 	adapter.db.Save(&record)
 
 	return nil
@@ -65,20 +59,16 @@ func (adapter *DBAdapter) UpdateDeviceDescription(deviceID string, description s
 	}
 
 	record.Description = description
-
 	adapter.db.Save(&record)
-
 	return nil
 }
 
 func (adapter *DBAdapter) DeleteDevice(deviceID string) error {
 	var device types.Device
 	result := adapter.db.Where("id = ?", deviceID).Delete(&device)
-
 	if result.Error != nil {
 		return result.Error
 	}
-
 	if result.RowsAffected != 1 {
 		return xerrors.Errorf("failed to delete a device")
 	}

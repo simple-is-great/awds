@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 
 	log "github.com/sirupsen/logrus"
-	"gorm.io/driver/mysql"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -43,8 +43,7 @@ func RemoveDBFile(config *commons.Config) error {
 
 // Start starts DBAdapter
 func Start(config *commons.Config) (*DBAdapter, error) {
-	dsn := "test:pass@127.0.0.1/awds?charset=utf8mb4&parseTime=True&loc=Local"
-  	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+  	db, err := gorm.Open(sqlite.Open(SQLiteDBFileName), &gorm.Config{})
 	// db, err := gorm.Open(sqlite.Open(SQLiteDBFileName), &gorm.Config{})
 	if err != nil {
 		return nil, err
