@@ -2,6 +2,8 @@ package logic
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 )
 
 func (logic *Logic) GetFullEndpoint(ip string, port string, endpoint string, startIdx int, endIdx int) string {
@@ -16,6 +18,26 @@ func (logic *Logic) HandleResponse(response map[string]interface{}, key string) 
 
 	return result, nil
 }
+
+// extractMetric parses the metric value from the metrics body using a regular expression.
+func extractMetric(metricsBody, metricName string) (float64, error) {
+    // Regular expression to match the metric line
+    re := regexp.MustCompile(metricName + ` (\d+(\.\d+)?(e[+-]?\d+)?)`)
+    matches := re.FindStringSubmatch(metricsBody)
+
+    if len(matches) < 2 {
+        return 0, fmt.Errorf("metric %s not found", metricName)
+    }
+
+    // Convert the string value to float64
+    value, err := strconv.ParseFloat(matches[1], 64)
+    if err != nil {
+        return 0, fmt.Errorf("error parsing value for metric %s: %v", metricName, err)
+    }
+
+    return value, nil
+}
+
 
 type Queue []string
 
@@ -40,3 +62,5 @@ func (q *Queue) Dequeue() (string, error) {
 	fmt.Printf("Dequeue: %v\n", data)
 	return data, nil
 }
+
+type deviceRecord map[string][]float64

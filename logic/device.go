@@ -32,10 +32,18 @@ func (logic *Logic) GetDevice(deviceID string) (types.Device, error) {
 	return logic.dbAdapter.GetDevice(deviceID)
 }
 
-func (logic *Logic) GetDeviceInfo(device *types.Device) (*types.Device, error) {
-	var response map[string]interface{}
+func (logic *Logic) GetDeviceResourceMetrics(device *types.Device) (*types.Device, error) {
+	type deviceResourceMetrics struct {
+		Memory			float64		`json:"memory"`
+		NetworkLatency 	float64		`json:"network_latency"`
+	}
+
+	var response deviceResourceMetrics
+
+	// get periodically stored metrics instead of measuring metrics again
 	requestAddr := fmt.Sprintf("http://%s:%s/computing_measure", device.IP, device.Port)
 	fmt.Println("requestAddr", requestAddr)
+	
 	client := resty.New()
 	_, err := client.R().SetResult(&response).Get(requestAddr)
 	if err != nil {
@@ -43,20 +51,26 @@ func (logic *Logic) GetDeviceInfo(device *types.Device) (*types.Device, error) {
 	}
 
 	// save info
-	if response["network_latency"].(float64) <= 0 {
-		return nil, fmt.Errorf("Network unavailable, value must be positive!")
-	}
-	device.NetworkLatency = response["network_latency"].(float64)
+	// body := string(resp.Body())
 
-	if response["cpu"].(float64) <= 0 { 
-		return nil, fmt.Errorf("CPU unavailable, value must be postive!")
-	}
-	device.CPU = response["cpu"].(float64)
+	// networkBandwidth, err := extractMetric(body, "network_bandwidth")
+    // if err != nil {
+    //     log.Fatalf("Error extracting network_bandwidth: %v", err)
+    // }
 
-	if response["memory"].(float64) <= 0 {
-		return nil, fmt.Errorf("Memory unavailable, value must be postive!")
-	}
-	device.Memory = response["memory"].(float64) // TODO: need to fix key, ram -> memory
+    // availableRam, err := extractMetric(body, "available_ram")
+    // if err != nil {
+    //     log.Fatalf("Error extracting available_ram: %v", err)
+    // }
+	
+
+	device.NetworkLatency = response.NetworkLatency // in Mbps
+	device.Memory = response.Memory / (1000 * 1000 * 1000) // in GBs
+
+	// // if response["cpu"].(float64) <= 0 { 
+	// // 	return nil, fmt.Errorf("CPU unavailable, value must be postive!")
+	// // }
+	// // device.CPU = response["cpu"].(float64)
 
 	fmt.Println("after getting info", device)
 
@@ -73,7 +87,7 @@ func (logic *Logic) CreateDevice(device *types.Device) error {
 	logger.Debug("received CreateDevice()")
 
 	// get device info
-	device, err := logic.GetDeviceInfo(device)
+	device, err := logic.GetDeviceResourceMetrics(device)
 	if err != nil {
 		return err
 	}

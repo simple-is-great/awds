@@ -21,7 +21,7 @@ type Device struct {
 	Port						string			`json:"port"` // metric server's port
 	Endpoint 					string	  		`json:"endpoint"` // endpoint to pull metric
 	Description 				string    		`json:"description,omitempty"`
-	CPU							float64			`json:"cpu"` 	  // CPU benchmark result(in seconds, lower is better)
+	// CPU							float64			`json:"cpu"` 	  // CPU benchmark result(in seconds, lower is better)
 	Memory						float64			`json:"memory"`	  // memory size
 	NetworkLatency				float64	  		`json:"network_latency"`
 	// BatchSize					int				`json:"batch_size"`

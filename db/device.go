@@ -39,6 +39,19 @@ func (adapter *DBAdapter) InsertDevice(device *types.Device) error {
 	return nil
 }
 
+func (adapter *DBAdapter) UpdateDeviceResourceMetrics(deviceID string, memory float64, networkBW float64) error {
+	var record types.Device
+	result := adapter.db.Where("id = ?", deviceID).Find(&record)
+	if result.Error != nil {
+		return result.Error
+	}
+	record.Memory = memory
+	record.NetworkLatency = networkBW
+	adapter.db.Save(&record)
+
+	return nil
+}
+
 func (adapter *DBAdapter) UpdateDeviceEndpoint(deviceID string, endpoint string) error {
 	var record types.Device
 	result := adapter.db.Where("id = ?", deviceID).Find(&record)
