@@ -42,7 +42,6 @@ func (logic *Logic) GetDeviceResourceMetrics(device *types.Device) (*types.Devic
 
 	// get periodically stored metrics instead of measuring metrics again
 	requestAddr := fmt.Sprintf("http://%s:%s/computing_measure", device.IP, device.Port)
-	fmt.Println("requestAddr", requestAddr)
 	
 	client := resty.New()
 	_, err := client.R().SetResult(&response).Get(requestAddr)
@@ -50,7 +49,7 @@ func (logic *Logic) GetDeviceResourceMetrics(device *types.Device) (*types.Devic
 		return nil, err
 	}
 
-	// save info
+	// save info - getting info from /metrics
 	// body := string(resp.Body())
 
 	// networkBandwidth, err := extractMetric(body, "network_bandwidth")
@@ -65,14 +64,13 @@ func (logic *Logic) GetDeviceResourceMetrics(device *types.Device) (*types.Devic
 	
 
 	device.NetworkLatency = response.NetworkLatency // in Mbps
-	device.Memory = response.Memory / (1000 * 1000 * 1000) // in GBs
+	// device.Memory = response.Memory / (1000 * 1000 * 1000) // in GBs
+	device.Memory = response.Memory // to verify upperlimit
 
 	// // if response["cpu"].(float64) <= 0 { 
 	// // 	return nil, fmt.Errorf("CPU unavailable, value must be postive!")
 	// // }
 	// // device.CPU = response["cpu"].(float64)
-
-	fmt.Println("after getting info", device)
 
 	return device, nil
 }

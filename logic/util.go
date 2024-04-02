@@ -10,15 +10,6 @@ func (logic *Logic) GetFullEndpoint(ip string, port string, endpoint string, sta
 	return fmt.Sprintf("http://%s:%s/%s/%d-%d", ip, port, endpoint, startIdx, endIdx)
 }
 
-func (logic *Logic) HandleResponse(response map[string]interface{}, key string) (interface{}, error) {
-	result, ok := response[key]
-	if !ok {
-		return fmt.Errorf("key '%s' is not found in response", key), nil
-	}
-
-	return result, nil
-}
-
 // extractMetric parses the metric value from the metrics body using a regular expression.
 func extractMetric(metricsBody, metricName string) (float64, error) {
     // Regular expression to match the metric line
@@ -49,7 +40,7 @@ func (q *Queue) IsEmpty() bool {
 //Enqueue - append value to the queue
 func (q *Queue) Enqueue (id string) {
 	*q = append(*q, id)
-	fmt.Printf("Enqueue: %v\n", id)
+	// fmt.Printf("Enqueue: %v\n", id)
 }
 
 //Dequeue - pop first element from queue
@@ -59,8 +50,10 @@ func (q *Queue) Dequeue() (string, error) {
 	}
 	data := (*q)[0] // get first element
 	*q = (*q)[1:]   // remove first element
-	fmt.Printf("Dequeue: %v\n", data)
+	// fmt.Printf("Dequeue: %v\n", data)
 	return data, nil
 }
 
-type deviceRecord map[string][]float64
+// func calculateComputeTime(batchSize float64, elapsedTime float64, networkLatency float64) float64 {
+// 	return elapsedTime - (batchSize / networkLatency)
+// }

@@ -4,6 +4,7 @@ import (
 	"awds/types"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -11,10 +12,14 @@ import (
 )
 
 var (
-	// starts small, grow later
-	batchSize int = 10
+	// batchSize int = 50
+	batchInit int = 50 // batchSize used for first batch
+	averageInputSize = 1000 // 10e5B -> 100 KB
 	// failedJob map[string][]string
 )
+
+// map to record device info for calculating batch size
+type deviceRecord map[string][]float64
 
 func (logic *Logic) ListJobs() ([]types.Job, error) {
 	logger := log.WithFields(log.Fields{
@@ -95,33 +100,36 @@ func (logic *Logic) DeleteJob(jobID string) error {
 	return logic.dbAdapter.DeleteJob(jobID)
 }
 
-func (logic *Logic) Precompute(devIdQ *Queue, devRcdMap deviceRecord, startIdx int, endIdx int) (int, error) {
+func (logic *Logic) AdjustBatchSize(devIdQ *Queue, devRcdMap *deviceRecord, startIdx int, endIdx int) (int, error) {
 	logger := log.WithFields(log.Fields{
 		"package": "logic",
 		"struct" : "Logic",
-		"function" : "Precompute",
+		"function" : "AdjustBatchSize",
 	})
-	logger.Debug("received Precompute()")
+	logger.Debug("received AdjustBatchSize()")
 
+	
 	deviceNum := len(*devIdQ)
-	// deviceLatencyList := make([]float64, deviceNum)
 	// precomputation: 1% / deviceNum, serve as endIdx for precomputation
-	precomputeSize := int(0.01 * float64(endIdx - startIdx - 1) / float64(deviceNum))
+	adjustBatchSize := int(0.01 * float64(endIdx - startIdx - 1) / float64(deviceNum))
 	// set minimum size to 1
-	if precomputeSize < 1 {
-		precomputeSize = 1 
+	if adjustBatchSize < 1 {
+		adjustBatchSize = 1 
 	}
-
+	
+	var wg sync.WaitGroup
+	wg.Add(len(*devIdQ))
 	errChan := make(chan error, 1)
 
 	for idx, deviceID := range *devIdQ{
 		device, err := logic.dbAdapter.GetDevice(deviceID)
 		if err != nil {
-			return -1, err
+			return 0, err
 		}
 
-		go func(i int)() {
-			precomputeLatency, err := logic.Compute(&device, startIdx, startIdx + precomputeSize)
+		func(i int)() {
+			defer wg.Done()
+			elapsedTime, err := logic.Compute(&device, startIdx, startIdx + adjustBatchSize)
 			if err != nil {
 				errChan <- err
 				return 
@@ -131,20 +139,54 @@ func (logic *Logic) Precompute(devIdQ *Queue, devRcdMap deviceRecord, startIdx i
 				errChan <- err
 				return
 			}
-
-			predictLatency := float64(batchSize / precomputeSize) * (precomputeLatency - float64(precomputeSize)/device.NetworkLatency)
-
-			devRcdMap[deviceID][0] = float64(precomputeSize) // precomputeSize in float64
-			devRcdMap[deviceID][1] = device.NetworkLatency // networkLatency
-			devRcdMap[deviceID][2] = precomputeLatency // precomputeLatency
-			devRcdMap[deviceID][3] = predictLatency
+			// SetNextBatchSize predictTime float64, elapsedTime float64, batchSize float64, adjustBatchSize int, batchNum int
+			// Predict elapsedTime float64, batchSize float64, batchSize float64, batchNum int
+			// predictTime, elapsedTime, batchSize, batchSize, batchNum
+			nextBatchSize := logic.SetNextBatchSize(float64(0), elapsedTime, device.Memory, float64(adjustBatchSize), adjustBatchSize, 1)
+			predictTime := logic.Predict(elapsedTime, float64(adjustBatchSize), float64(nextBatchSize), 1)
+			fmt.Println("AdjustBatchSize(deviceID, elapsedTime, adjustBatchSize, nextBatchSize, predictTime): ", device.ID, elapsedTime, adjustBatchSize, nextBatchSize, predictTime)
+			(*devRcdMap)[deviceID][0] = predictTime // current PredictTime
+			(*devRcdMap)[deviceID][1] = elapsedTime // current elapsedTime
+			(*devRcdMap)[deviceID][2] = float64(adjustBatchSize) // current BatchSize
+			(*devRcdMap)[deviceID][3] = float64(nextBatchSize)// nextBatchSize
+			(*devRcdMap)[deviceID][4] += 1 // used to count batchNumber
+			return
+			
 		}(idx)
-		startIdx += precomputeSize // update StartIdx
-
-
+		startIdx += adjustBatchSize // update StartIdx
 	}
-	
-	return precomputeSize * deviceNum, nil
+
+	wg.Wait()
+
+	return adjustBatchSize, nil
+}
+
+func (logic *Logic) SetNextBatchSize(predictTime float64, elapsedTime float64, availableMemory float64, batchSize float64, adjustBatchSize int, batchNum int) int {
+	// set nextBatchSize based on predictTime, elapsedTime, batchSize of current batchSize
+	switch (batchNum){
+	case 0:
+		return adjustBatchSize
+	case 1:
+		return batchInit
+	default:
+		nextBatch := int(predictTime / elapsedTime * batchSize)
+		if nextBatch < 1{
+			nextBatch = 1
+		} else if int(averageInputSize * nextBatch) > int(0.8 * availableMemory){
+			nextBatch = int(0.8 * availableMemory / float64(averageInputSize))
+		}
+		return nextBatch
+	}
+}
+
+
+func (logic *Logic) Predict(elapsedTime float64, batchSize float64, nextBatchSize float64, batchNum int) float64{
+	// predict based on elapsedTime, batchSize, nextBatchSize
+	if batchNum == 0 {
+		return 0
+	} else {
+		return (elapsedTime/ batchSize) * nextBatchSize
+	}
 }
 
 func (logic *Logic) Compute(device *types.Device, batchStartIdx int, batchEndIdx int) (float64, error) {
@@ -156,7 +198,10 @@ func (logic *Logic) Compute(device *types.Device, batchStartIdx int, batchEndIdx
 
 	logger.Debugf("received Compute()")
 
-	var response map[string]interface{}
+	type Response struct {
+		Result	float64	`json: "result"`
+	}
+	var response Response
 	fullEndpoint := logic.GetFullEndpoint(device.IP, device.Port,device.Endpoint, batchStartIdx, batchEndIdx)
 	
 	client := resty.New()
@@ -165,9 +210,9 @@ func (logic *Logic) Compute(device *types.Device, batchStartIdx int, batchEndIdx
 		return -1, err
 	}
 	
-	computeLatency := response["result"].(float64)
+	elapsedTime := response.Result
 
-	return computeLatency, nil
+	return elapsedTime, nil
 }
 
 
@@ -212,46 +257,62 @@ func (logic *Logic) ScheduleJob(jobID string) error {
 		"struct" : "Logic",
 		"function" : "ScheduleJob",
 	})
-
+	
 	logger.Debug("received ScheduleJob()")
 	
+	// filename := time.Now().Format("01-02-15:04:05")
+	// file, err := os.Create(filename + ".txt")
+	// if err != nil {
+	// 	fmt.Println("Error create file:", err)
+	// 	os.Exit(1)
+	// }
+	// defer file.Close()
+
+	// os.Stdout = file
+
 	startTime := time.Now()
 	job, err := logic.dbAdapter.GetJob(jobID)
 	if err != nil {
 		return err
 	}
 	// start index for batch, increases from job.StartIndex to job.EndIndex	
-	batchStartIdx := job.StartIndex
-	batchEndIdx := 0 // end index for batch
 	jobStartIdx := job.StartIndex // start index for job
 	jobEndIdx := job.EndIndex // end index for job
+	batchStartIdx := jobStartIdx
+	var batchEndIdx int
+	
 
-	// err channel for goroutines
 	errChan := make(chan error, 1)
-	// map to hold previous and current latency
 	// queue to hold available deviceID
 	var deviceIDQueue Queue
-	var deviceRecordMap deviceRecord
+	// map to hold previous and current latency
+	deviceRecordMap := deviceRecord{}
 	for _, deviceID := range job.DeviceIDList{
 		deviceIDQueue.Enqueue(deviceID)
-		deviceRecordMap[deviceID] = make([]float64, 4)
+		deviceRecordMap[deviceID] = make([]float64, 5)
 	}
 	
-	// 전체 device 동시에 수행
-	precomputeSize, err := logic.Precompute(&deviceIDQueue, deviceRecordMap, jobStartIdx, jobEndIdx)
+	// adjustBatchSize for entire time
+	adjustBatchSize, err := logic.AdjustBatchSize(&deviceIDQueue, &deviceRecordMap, jobStartIdx, jobEndIdx)
 		if err != nil {
 			return err
 	}
 
-	jobStartIdx += precomputeSize // update precompute results
+	// for _, deviceID := range job.DeviceIDList{
+	// 	fmt.Printf("after adjustment: ")
+	// 	fmt.Println(deviceID, deviceRecordMap[deviceID])
+	// }
+
+	jobStartIdx += adjustBatchSize * len(job.DeviceIDList) // update precompute results
+	batchEndIdx = jobStartIdx
 
 	for {
-		// TODO: we need to calculate batchSize and pass into threads
 		// get deviceID from queue
+		// TODO: busy waiting -> change later
 		if len(deviceIDQueue) == 0 {
 			continue
 		}
-
+		
 		dID, err := deviceIDQueue.Dequeue()
 		if err != nil {
 			fmt.Println(err)
@@ -263,76 +324,72 @@ func (logic *Logic) ScheduleJob(jobID string) error {
 			return err
 		}
 
-		// not first time -> modify startIdx then move on
-		if batchStartIdx != jobStartIdx{
-			batchStartIdx += batchSize
-			batchEndIdx = batchStartIdx + batchSize // TODO: need to get batchSize from precomputation results
-
-			if batchStartIdx + batchSize > jobEndIdx{
-				batchEndIdx = jobEndIdx
-			}
+		if (batchStartIdx > jobEndIdx) || (batchEndIdx == jobEndIdx) {
+			break // job done
 		}
+
+		batchSize := int(deviceRecordMap[dID][3]) // call batchSize from deviceRecord
+
+		// swap batchEndIdx and batchStartIdx
+		temp := batchEndIdx
+		batchStartIdx := batchEndIdx
+		batchEndIdx = temp + batchSize
+
+		// batchEndIdx cannot exceed jobEndIdx
+		if batchEndIdx > jobEndIdx {
+			batchEndIdx = jobEndIdx
+		}
+
+		deviceRecordMap[dID][2] = deviceRecordMap[dID][3] // update nextbatchSize to currentBatchSize
+		deviceRecordMap[dID][4] += 1 // update batchNum
 
 		// batchStartIdx  < jobEndIndex -> create thread
 		if batchStartIdx < jobEndIdx{
 			// func inside thread
 			go func(){
 				// send compute request to device
-				currentLatency, err := logic.Compute(&device, batchStartIdx, batchEndIdx)
+				elapsedTime, err := logic.Compute(&device, batchStartIdx, batchEndIdx)
 				if err != nil {
 					errChan <- err
 					return 
 				}
-				// set current latency for computation
-				fmt.Println(dID, "current latency", currentLatency, "s")
-				// // update resource metric of device when batch ends
-				fmt.Println("before getting metrics ", device.Memory, device.NetworkLatency)
+
+				// update resource metric of device when batch ends
 				device, err := logic.GetDeviceResourceMetrics(&device)
 				if err != nil {
 					errChan <- err
 					return
 				}
-
-				predictLatency := float64(float64(precomputeSize)/deviceRecordMap[dID][3]) * float64(batchSize)
-
-				deviceRecordMap[dID][0] = float64(batchSize) // precomputeSize in float64
-				deviceRecordMap[dID][1] = device.NetworkLatency // networkLatency
-				deviceRecordMap[dID][2] = currentLatency // precomputeLatency
-				deviceRecordMap[dID][3] = predictLatency // predict next batch's latency
+				
+				nextBatchSize := logic.SetNextBatchSize(deviceRecordMap[dID][0], deviceRecordMap[dID][1], device.Memory, deviceRecordMap[dID][2], 0, int(deviceRecordMap[dID][4]))
+				predictTime := logic.Predict(deviceRecordMap[dID][1], deviceRecordMap[dID][2], float64(nextBatchSize), int(deviceRecordMap[dID][4]))
+				fmt.Println("In Schedule loop(deviceID, elapsedTime, batchSize, nextBatchSize, predictTime): ", dID, elapsedTime, batchSize, nextBatchSize, predictTime)
+				deviceRecordMap[dID][0] = predictTime // predictTime
+				deviceRecordMap[dID][1] = elapsedTime // elapsedTime
+				deviceRecordMap[dID][2] = float64(batchSize) // current batch Size
+				deviceRecordMap[dID][3] = float64(nextBatchSize) // next batch Size
 				
 				// err = logic.dbAdapter.UpdateDeviceResourceMetrics(dID, device.Memory, device.NetworkLatency)
 				// if err != nil {
 				// 	errChan <- err
 				// 	return
 				// }
-				fmt.Println("after getting metrics", device.Memory, device.NetworkLatency)
+
 				// compute succeed -> enqueue deviceID to get another batch
 				deviceIDQueue.Enqueue(dID)
 			}()
 		}
 
-		// first time -> modify startIdx after compute
-		// if batchStartIdx == job.StartIndex{
-		// 	batchStartIdx += batchSize
-		// 	batchEndIdx = batchStartIdx + batchSize // TODO: need to get batchSize from precomputation results
-		
-		// 	if batchStartIdx + batchSize > jobEndIdx{
-		// 		batchEndIdx = jobEndIdx 
-		// 	}
-		// }
-		
-		fmt.Println("batchStartIdx & batchEndIdx", batchStartIdx, batchEndIdx)
+		// fmt.Println("batchStartIdx & batchEndIdx", batchStartIdx, batchEndIdx)
 		// job ended
-		if (batchEndIdx == jobEndIdx) || (batchStartIdx >= jobEndIdx) {
-			fmt.Println("Job Done!")
-			break
-		}
-	}
+		// if (batchEndIdx == jobEndIdx) || (batchStartIdx >= jobEndIdx) {
+		// 	fmt.Println("Job Done!")
+		// 	break
+		// }
 
+	}
 	// TODO: handle resources after goroutine finishes
-	// TODO: handle errors if goroutine fails
-	
-	fmt.Println("startIdx after scheduling", batchStartIdx)
+	// fmt.Println("startIdx after scheduling", batchStartIdx)
 	// update startIdx
 	err = logic.dbAdapter.UpdateStartIndex(jobID, batchStartIdx)
 	if err != nil {
@@ -347,16 +404,6 @@ func (logic *Logic) ScheduleJob(jobID string) error {
 	timeTaken := time.Since(startTime)
 	fmt.Println("time taken:", timeTaken)
 	return nil
-}
-
-func (logic *Logic) CalcBatchSize(deviceID string, devRcdMap deviceRecord)(int, error){
-	// 1. 예측
-	// 2. 다음 배치 계산
-
-
-
-
-	return batchSize, nil
 }
 		
 // func (logic *Logic) UnscheduleJob(jobID string) error {
