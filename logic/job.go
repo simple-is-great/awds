@@ -3,6 +3,7 @@ package logic
 import (
 	"awds/types"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -11,10 +12,12 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+
 var (
 	// batchSize int = 50
-	batchInit int = 50 // batchSize used for first batch
+	batchInit int = 30 // batchSize used for first batch
 	averageInputSize = 1000 // 10e5B -> 100 KB
+	precomputeResult = []float64{46.46300911903381, 24.42876386642456, 31.25728440284729, 2.646643877029419,0.370161771774292}
 	// failedJob map[string][]string
 )
 
@@ -100,6 +103,27 @@ func (logic *Logic) DeleteJob(jobID string) error {
 	return logic.dbAdapter.DeleteJob(jobID)
 }
 
+// for reference
+//  raspPi4 = 46.46300911903381  // 1
+// 	raspPi5 = 24.42876386642456  // 2
+// 	jetsonNanoCPU = 31.25728440284729 // 1.5
+// 	// 젯슨 나노 (GPU) : 하는중…. // 
+// 	podCPU = 2.646643877029419 // 17.5
+// 	podGPU = 0.370161771774292 // 125.5
+func (logic *Logic) determineDeviceType(elapsedTime float64) int {
+	idx := 0
+	diff := math.Abs(precomputeResult[0] - elapsedTime)
+	for i, v := range(precomputeResult) {
+		if math.Abs(v - elapsedTime) < diff {
+			idx = i
+			diff = math.Abs(v - elapsedTime)
+		}
+	}
+
+	return int(precomputeResult[0] / precomputeResult[idx] * float64(batchInit))
+}
+
+
 func (logic *Logic) AdjustBatchSize(devIdQ *Queue, devRcdMap *deviceRecord, startIdx int, endIdx int) (int, error) {
 	logger := log.WithFields(log.Fields{
 		"package": "logic",
@@ -108,17 +132,16 @@ func (logic *Logic) AdjustBatchSize(devIdQ *Queue, devRcdMap *deviceRecord, star
 	})
 	logger.Debug("received AdjustBatchSize()")
 
-	
 	deviceNum := len(*devIdQ)
+	adjustBatchSize := 30
 	// precomputation: 1% / deviceNum, serve as endIdx for precomputation
-	adjustBatchSize := int(0.01 * float64(endIdx - startIdx - 1) / float64(deviceNum))
-	// set minimum size to 1
-	if adjustBatchSize < 1 {
-		adjustBatchSize = 1 
-	}
+	// adjustBatchSize := int(0.01 * float64(endIdx - startIdx - 1) / float64(deviceNum))
+	// if adjustBatchSize < 1 {
+	// 	adjustBatchSize = 1 
+	// }
 	
 	var wg sync.WaitGroup
-	wg.Add(len(*devIdQ))
+	wg.Add(deviceNum)
 	errChan := make(chan error, 1)
 
 	for idx, deviceID := range *devIdQ{
@@ -139,10 +162,14 @@ func (logic *Logic) AdjustBatchSize(devIdQ *Queue, devRcdMap *deviceRecord, star
 				errChan <- err
 				return
 			}
+			
+			// implement function to determine device -> nextBatchSize 
+
 			// SetNextBatchSize predictTime float64, elapsedTime float64, batchSize float64, adjustBatchSize int, batchNum int
 			// Predict elapsedTime float64, batchSize float64, batchSize float64, batchNum int
 			// predictTime, elapsedTime, batchSize, batchSize, batchNum
-			nextBatchSize := logic.SetNextBatchSize(float64(0), elapsedTime, device.Memory, float64(adjustBatchSize), adjustBatchSize, 1)
+			nextBatchSize := logic.determineDeviceType(elapsedTime)
+			fmt.Println("nextBatchSize", nextBatchSize)
 			predictTime := logic.Predict(elapsedTime, float64(adjustBatchSize), float64(nextBatchSize), 1)
 			fmt.Println("AdjustBatchSize(deviceID, elapsedTime, adjustBatchSize, nextBatchSize, predictTime): ", device.ID, elapsedTime, adjustBatchSize, nextBatchSize, predictTime)
 			(*devRcdMap)[deviceID][0] = predictTime // current PredictTime
@@ -163,20 +190,13 @@ func (logic *Logic) AdjustBatchSize(devIdQ *Queue, devRcdMap *deviceRecord, star
 
 func (logic *Logic) SetNextBatchSize(predictTime float64, elapsedTime float64, availableMemory float64, batchSize float64, adjustBatchSize int, batchNum int) int {
 	// set nextBatchSize based on predictTime, elapsedTime, batchSize of current batchSize
-	switch (batchNum){
-	case 0:
-		return adjustBatchSize
-	case 1:
-		return batchInit
-	default:
-		nextBatch := int(predictTime / elapsedTime * batchSize)
-		if nextBatch < 1{
-			nextBatch = 1
-		} else if int(averageInputSize * nextBatch) > int(0.8 * availableMemory){
-			nextBatch = int(0.8 * availableMemory / float64(averageInputSize))
-		}
-		return nextBatch
+	nextBatch := int(predictTime / elapsedTime * batchSize)
+	if nextBatch < 1{
+		nextBatch = 1
+	} else if int(averageInputSize * nextBatch) > int(0.8 * availableMemory){
+		nextBatch = int(0.8 * availableMemory / float64(averageInputSize))
 	}
+	return nextBatch
 }
 
 
